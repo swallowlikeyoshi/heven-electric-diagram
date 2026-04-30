@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>HEVEN 2026 전장 시스템 다이어그램</title>
+  <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; background: #0f1117; color: #e0e0e0; font-family: 'Segoe UI', 'Malgun Gothic', sans-serif; }
+    h1 { height: 41px; padding: 10px 20px; font-size: 16px; background: #1a1d2e; border-bottom: 1px solid #2a2d3e; letter-spacing: 1px; color: #ccc; }
+    h1 span { color: #f90; font-weight: bold; }
+    #network { position: absolute; top: 41px; left: 0; right: 0; bottom: 0; }
+    #legend {
+      position: fixed; bottom: 16px; right: 16px;
+      background: rgba(15,17,23,0.92); border: 1px solid #2a2d3e;
+      border-radius: 8px; padding: 12px 16px; font-size: 12px; line-height: 2;
+      backdrop-filter: blur(4px);
+    }
+    #legend h3 { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+    .legend-row { display: flex; align-items: center; gap: 8px; }
+    .legend-line { width: 28px; height: 3px; border-radius: 2px; }
+    .legend-dot { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
+    #info {
+      position: fixed; top: 50px; left: 16px;
+      background: rgba(15,17,23,0.92); border: 1px solid #2a2d3e;
+      border-radius: 8px; padding: 10px 14px; font-size: 12px;
+      color: #888; backdrop-filter: blur(4px);
+    }
+  </style>
+</head>
+<body>
+<h1>HEVEN 2026 &nbsp;/&nbsp; <span>전장 시스템 다이어그램</span></h1>
+<div id="network"></div>
+
+<div id="info">드래그: 이동 &nbsp;|&nbsp; 스크롤: 줌 &nbsp;|&nbsp; 더블클릭: 핀 고정</div>
+
+<div id="legend">
+  <h3>범례</h3>
+  <div class="legend-row"><div class="legend-dot" style="background:#FF6B35"></div> HV 48V 전원</div>
+  <div class="legend-row"><div class="legend-dot" style="background:#4CAF50"></div> 구동계 (드라이브)</div>
+  <div class="legend-row"><div class="legend-dot" style="background:#FFC107"></div> LV 12V/5V 전원</div>
+  <div class="legend-row"><div class="legend-dot" style="background:#F44336"></div> 셧다운 회로</div>
+  <div class="legend-row"><div class="legend-dot" style="background:#2196F3"></div> VCU / 신호처리</div>
+  <div class="legend-row"><div class="legend-dot" style="background:#00BCD4"></div> Cluster / 계기판</div>
+  <div class="legend-row"><div class="legend-dot" style="background:#9C27B0"></div> 센서 입력</div>
+  <div class="legend-row"><div class="legend-dot" style="background:#607D8B"></div> 기타 장치</div>
+  <br>
+  <div class="legend-row"><div class="legend-line" style="background:#FF6B35"></div> HV 배선 (주황)</div>
+  <div class="legend-row"><div class="legend-line" style="background:#ef5350"></div> LV 전원 (적)</div>
+  <div class="legend-row"><div class="legend-line" style="background:#B71C1C; border-top: 2px dashed #B71C1C; height:0"></div> 셧다운 체인</div>
+  <div class="legend-row"><div class="legend-line" style="background:#42A5F5"></div> CAN 버스</div>
+  <div class="legend-row"><div class="legend-line" style="background:#66BB6A"></div> 신호 / 센서</div>
+  <div class="legend-row"><div class="legend-line" style="background:#26C6DA"></div> I2C / SPI</div>
+</div>
+
+<script>
+const GROUPS = {
+  hv:       { color: { background: '#FF6B35', border: '#E64A19', highlight: { background: '#FF8A65', border: '#FF6B35' } } },
+  drive:    { color: { background: '#388E3C', border: '#1B5E20', highlight: { background: '#4CAF50', border: '#388E3C' } } },
+  lv:       { color: { background: '#F9A825', border: '#F57F17', highlight: { background: '#FFD54F', border: '#FFC107' } } },
+  shutdown: { color: { background: '#C62828', border: '#7f0000', highlight: { background: '#EF5350', border: '#C62828' } } },
+  vcu:      { color: { background: '#1565C0', border: '#0D47A1', highlight: { background: '#42A5F5', border: '#1565C0' } } },
+  cluster:  { color: { background: '#00838F', border: '#004D40', highlight: { background: '#26C6DA', border: '#00838F' } } },
+  sensor:   { color: { background: '#6A1B9A', border: '#4A148C', highlight: { background: '#AB47BC', border: '#6A1B9A' } } },
+  other:    { color: { background: '#455A64', border: '#263238', highlight: { background: '#78909C', border: '#455A64' } } },
+};
+
+const nodeStyle = {
+  shape: 'box',
+  borderWidth: 1,
+  borderWidthSelected: 2,
+  font: { color: '#fff', size: 12, face: 'Segoe UI, Malgun Gothic, sans-serif' },
+  shadow: { enabled: true, color: 'rgba(0,0,0,0.5)', size: 6, x: 2, y: 2 },
+  margin: { top: 8, bottom: 8, left: 10, right: 10 },
+};
+
+const nodes = new vis.DataSet([
+  // ── HV 전원 ─────────────────────────────────
+  { id: 1,  label: '🔋 Battery 48V\n14S16P INR21700-50S', group: 'hv',  x: -900, y: -200, ...nodeStyle },
+  { id: 2,  label: 'BMS',                                  group: 'hv',  x: -750, y: -350, ...nodeStyle },
+  { id: 3,  label: 'Fuse 300A\nANL 60V DC',               group: 'hv',  x: -750, y: -150, ...nodeStyle },
+  { id: 4,  label: 'AIR Relay\n격리 릴레이',               group: 'hv',  x: -550, y: -200, ...nodeStyle },
+  { id: 5,  label: 'HV Junction\n링터미널 분기',           group: 'hv',  x: -350, y: -200, ...nodeStyle },
+  { id: 6,  label: 'Energy Meter\nCAN SA=0x17',            group: 'hv',  x: -100, y: -400, ...nodeStyle },
+
+  // ── 구동계 ───────────────────────────────────
+  { id: 7,  label: 'Controller_L\nEZkontrol A48500\nSA=0xEF', group: 'drive', x: 200,  y: -350, ...nodeStyle },
+  { id: 8,  label: 'Controller_R\nEZkontrol A48500\nSA=0xF0', group: 'drive', x: 200,  y: -150, ...nodeStyle },
+  { id: 9,  label: '⚡ Motor_L\nPMSM',                    group: 'drive', x: 500,  y: -350, ...nodeStyle },
+  { id: 10, label: '⚡ Motor_R\nPMSM',                    group: 'drive', x: 500,  y: -150, ...nodeStyle },
+
+  // ── LV 전원 ─────────────────────────────────
+  { id: 11, label: '🔋 Battery 12V',                       group: 'lv',  x: -900, y: 300,  ...nodeStyle },
+  { id: 12, label: 'LV Master SW',                         group: 'lv',  x: -750, y: 300,  ...nodeStyle },
+  { id: 13, label: 'LV Bus\n(12V Switched)',               group: 'lv',  x: -600, y: 300,  ...nodeStyle },
+  { id: 14, label: 'DC-DC 5V\n(VCU용)',                   group: 'lv',  x: -450, y: 200,  ...nodeStyle },
+  { id: 15, label: 'DC-DC 5V\n(Cluster용)',               group: 'lv',  x: -450, y: 400,  ...nodeStyle },
+
+  // ── 셧다운 회로 ──────────────────────────────
+  { id: 16, label: 'BOTS\n브레이크 페달 스위치',           group: 'shutdown', x: -750, y: 50,  ...nodeStyle },
+  { id: 17, label: 'HV Master SW\n주 비상정지',            group: 'shutdown', x: -600, y: 50,  ...nodeStyle },
+  { id: 18, label: 'SD Btn 1\n보조 비상정지',              group: 'shutdown', x: -450, y: 50,  ...nodeStyle },
+  { id: 19, label: 'SD Btn 2\n보조 비상정지',              group: 'shutdown', x: -300, y: 50,  ...nodeStyle },
+  { id: 20, label: 'SD Btn 3\n위치 TBD',                  group: 'shutdown', x: -150, y: 50,  ...nodeStyle },
+  { id: 21, label: 'NODE_A\n셧다운 체인 끝',               group: 'shutdown', x: -50,  y: 50,  ...nodeStyle },
+  { id: 22, label: 'Start Btn\n시동 버튼',                 group: 'shutdown', x: 50,   y: 150, ...nodeStyle },
+  { id: 23, label: 'Start Relay\n자기유지 회로',           group: 'shutdown', x: 150,  y: 50,  ...nodeStyle },
+
+  // ── VCU 클러스터 ─────────────────────────────
+  { id: 24, label: '🖥 VCU_ESP32\nSA=0xD0',               group: 'vcu', x: -100, y: 150,  ...nodeStyle },
+  { id: 25, label: 'CAN TR\n(VCU)',                        group: 'vcu', x: -100, y: -400, ...nodeStyle },
+  { id: 26, label: 'MPU-6050\nIMU 가속도/자이로',          group: 'vcu', x: -250, y: 200,  ...nodeStyle },
+  { id: 27, label: 'LM393\n비교기 (WSS FL/FR)',            group: 'vcu', x: -100, y: 350,  ...nodeStyle },
+  { id: 28, label: '74HC14\n레벨변환 (WSS RL/RR)',         group: 'vcu', x: 100,  y: 350,  ...nodeStyle },
+
+  // ── Cluster 클러스터 ─────────────────────────
+  { id: 29, label: '🖥 Cluster_ESP32\nSA=0xC0',           group: 'cluster', x: 400, y: 150,  ...nodeStyle },
+  { id: 30, label: 'CAN TR\n(Cluster)',                    group: 'cluster', x: 200, y: -400, ...nodeStyle },
+  { id: 31, label: 'MCP23017\nGPIO 확장',                 group: 'cluster', x: 550, y: 50,   ...nodeStyle },
+  { id: 32, label: 'OLED\n계기 디스플레이',               group: 'cluster', x: 550, y: 200,  ...nodeStyle },
+  { id: 33, label: 'SD Card\n데이터로거',                  group: 'cluster', x: 550, y: 350,  ...nodeStyle },
+
+  // ── 센서 ─────────────────────────────────────
+  { id: 34, label: 'Throttle\n홀센서',                    group: 'sensor', x: -400, y: 400, ...nodeStyle },
+  { id: 35, label: 'Steering POT\n아날로그',              group: 'sensor', x: -300, y: 500, ...nodeStyle },
+  { id: 36, label: 'Gear Knob\nR/N/D 저항사다리',         group: 'sensor', x: -150, y: 500, ...nodeStyle },
+  { id: 37, label: 'Brake Pedal\n브레이크 센서',          group: 'sensor', x: -50,  y: 500, ...nodeStyle },
+  { id: 38, label: 'WSS_FL\n아반떼 2선식',               group: 'sensor', x: 50,   y: 500, ...nodeStyle },
+  { id: 39, label: 'WSS_FR\n아반떼 2선식',               group: 'sensor', x: 200,  y: 500, ...nodeStyle },
+
+  // ── 대시보드 / 기타 ───────────────────────────
+  { id: 40, label: '🔘 Switch Panel\n×8 (MCP GPA)',       group: 'other', x: 700, y: -50,  ...nodeStyle },
+  { id: 41, label: '💡 LED Panel\n×8 (MCP GPB)',          group: 'other', x: 700, y: 100,  ...nodeStyle },
+  { id: 42, label: 'Forward/Rev SW\n컨트롤러 직결',       group: 'other', x: 700, y: 250,  ...nodeStyle },
+  { id: 43, label: 'VESS SW\n속도 연동',                  group: 'other', x: 400, y: -50,  ...nodeStyle },
+  { id: 44, label: '🔊 VESS Unit\n70dB↑ 스피커/앰프',    group: 'other', x: 600, y: -200, ...nodeStyle },
+  { id: 45, label: '🚗 Brake Light\n15W↑',               group: 'other', x: 350, y: 500,  ...nodeStyle },
+  { id: 46, label: 'TSMP\n4mm Banana Jack',               group: 'other', x: -550, y: -350, ...nodeStyle },
+]);
+
+const edgeStyle = { smooth: { type: 'curvedCW', roundness: 0.1 }, font: { size: 10, color: '#aaa', strokeWidth: 0 }, arrows: { to: { enabled: true, scaleFactor: 0.6 } } };
+
+const edges = new vis.DataSet([
+  // ── HV 전원 경로 (주황, 굵음) ────────────────
+  { from: 1,  to: 2,  label: 'HV B-',        color: { color: '#FF6B35' }, width: 4, ...edgeStyle },
+  { from: 1,  to: 3,  label: 'HV B+',        color: { color: '#FF6B35' }, width: 4, ...edgeStyle },
+  { from: 3,  to: 4,  label: '퓨즈 통과',    color: { color: '#FF6B35' }, width: 4, ...edgeStyle },
+  { from: 2,  to: 5,  label: 'BMS P-',       color: { color: '#FF6B35' }, width: 4, ...edgeStyle },
+  { from: 4,  to: 5,  label: 'HV switched',  color: { color: '#FF9800' }, width: 4, ...edgeStyle },
+  { from: 5,  to: 7,  label: '48V',          color: { color: '#FF6B35' }, width: 4, ...edgeStyle },
+  { from: 5,  to: 8,  label: '48V',          color: { color: '#FF6B35' }, width: 4, ...edgeStyle },
+  { from: 5,  to: 6,  label: '대회날\n연결', color: { color: '#FF6B35' }, width: 2, dashes: [6,4], ...edgeStyle },
+  { from: 5,  to: 46, label: 'TSMP',         color: { color: '#FF6B35' }, width: 1, dashes: [4,4], ...edgeStyle },
+
+  // ── 모터 구동 (진녹, 굵음) ───────────────────
+  { from: 7,  to: 9,  label: '3상 UVW',      color: { color: '#2E7D32' }, width: 4, ...edgeStyle },
+  { from: 8,  to: 10, label: '3상 UVW',      color: { color: '#2E7D32' }, width: 4, ...edgeStyle },
+  { from: 9,  to: 7,  label: 'Hall+Temp',    color: { color: '#AB47BC' }, width: 1, dashes: [4,3], ...edgeStyle },
+  { from: 10, to: 8,  label: 'Hall+Temp',    color: { color: '#AB47BC' }, width: 1, dashes: [4,3], ...edgeStyle },
+
+  // ── LV 전원 (적) ─────────────────────────────
+  { from: 11, to: 12, label: '12V',          color: { color: '#ef5350' }, width: 2, ...edgeStyle },
+  { from: 12, to: 13, label: '12V sw',       color: { color: '#ef5350' }, width: 2, ...edgeStyle },
+  { from: 13, to: 7,  label: '12V aux',      color: { color: '#ef5350' }, width: 2, ...edgeStyle },
+  { from: 13, to: 8,  label: '12V aux',      color: { color: '#ef5350' }, width: 2, ...edgeStyle },
+  { from: 13, to: 14, label: '12V',          color: { color: '#ef5350' }, width: 2, ...edgeStyle },
+  { from: 13, to: 15, label: '12V',          color: { color: '#ef5350' }, width: 2, ...edgeStyle },
+  { from: 14, to: 24, label: '5V',           color: { color: '#FF8A80' }, width: 1, ...edgeStyle },
+  { from: 15, to: 29, label: '5V',           color: { color: '#FF8A80' }, width: 1, ...edgeStyle },
+  { from: 13, to: 44, label: '12V',          color: { color: '#ef5350' }, width: 1, ...edgeStyle },
+
+  // ── 셧다운 체인 (진적, 점선) ─────────────────
+  { from: 11, to: 16, label: 'SD 시작\n(직결)',  color: { color: '#B71C1C' }, width: 2, dashes: [6,3], ...edgeStyle },
+  { from: 16, to: 17,                            color: { color: '#B71C1C' }, width: 2, dashes: [6,3], ...edgeStyle },
+  { from: 17, to: 18,                            color: { color: '#B71C1C' }, width: 2, dashes: [6,3], ...edgeStyle },
+  { from: 18, to: 19,                            color: { color: '#B71C1C' }, width: 2, dashes: [6,3], ...edgeStyle },
+  { from: 19, to: 20,                            color: { color: '#B71C1C' }, width: 2, dashes: [6,3], ...edgeStyle },
+  { from: 20, to: 21, label: 'NODE_A',           color: { color: '#B71C1C' }, width: 2, dashes: [6,3], ...edgeStyle },
+  { from: 21, to: 22,                            color: { color: '#B71C1C' }, width: 2, dashes: [6,3], ...edgeStyle },
+  { from: 22, to: 23, label: '코일 트리거',      color: { color: '#B71C1C' }, width: 2, ...edgeStyle },
+  { from: 21, to: 23, label: '자기유지 전원',    color: { color: '#B71C1C' }, width: 1, dashes: [3,3], ...edgeStyle },
+  { from: 23, to: 4,  label: 'AIR 코일 구동',   color: { color: '#B71C1C' }, width: 3, ...edgeStyle },
+
+  // ── CAN 버스 (파랑) ───────────────────────────
+  { from: 24, to: 25, label: 'TWAI',              color: { color: '#42A5F5' }, width: 2, ...edgeStyle },
+  { from: 25, to: 7,  label: 'CAN 250k',          color: { color: '#1565C0' }, width: 2, ...edgeStyle },
+  { from: 7,  to: 8,  label: 'CAN 데이지체인',    color: { color: '#1565C0' }, width: 2, ...edgeStyle },
+  { from: 8,  to: 6,  label: 'CAN',               color: { color: '#1565C0' }, width: 2, ...edgeStyle },
+  { from: 6,  to: 30, label: 'CAN',               color: { color: '#1565C0' }, width: 2, ...edgeStyle },
+  { from: 30, to: 29, label: 'TWAI',              color: { color: '#42A5F5' }, width: 2, ...edgeStyle },
+
+  // ── VCU 센서 입력 (초록) ──────────────────────
+  { from: 34, to: 24, label: 'ADC D35',           color: { color: '#66BB6A' }, width: 1, ...edgeStyle },
+  { from: 35, to: 24, label: 'ADC D33',           color: { color: '#66BB6A' }, width: 1, ...edgeStyle },
+  { from: 36, to: 24, label: 'ADC D27',           color: { color: '#66BB6A' }, width: 1, ...edgeStyle },
+  { from: 37, to: 24, label: 'DIG D32',           color: { color: '#66BB6A' }, width: 1, ...edgeStyle },
+  { from: 26, to: 24, label: 'I2C+INT\nD21/22/14',color: { color: '#26C6DA' }, width: 1, ...edgeStyle },
+  { from: 38, to: 27, label: '2선식 전류출력',    color: { color: '#66BB6A' }, width: 1, ...edgeStyle },
+  { from: 39, to: 27, label: '2선식 전류출력',    color: { color: '#66BB6A' }, width: 1, ...edgeStyle },
+  { from: 27, to: 24, label: 'DIG D36/D39',       color: { color: '#66BB6A' }, width: 1, ...edgeStyle },
+  { from: 9,  to: 28, label: 'Hall_A 분기',       color: { color: '#AB47BC' }, width: 1, dashes: [4,3], ...edgeStyle },
+  { from: 10, to: 28, label: 'Hall_A 분기',       color: { color: '#AB47BC' }, width: 1, dashes: [4,3], ...edgeStyle },
+  { from: 28, to: 24, label: 'DIG D25/D26',       color: { color: '#66BB6A' }, width: 1, ...edgeStyle },
+
+  // ── Cluster 내부 (청록) ──────────────────────
+  { from: 29, to: 31, label: 'I2C',               color: { color: '#26C6DA' }, width: 1, ...edgeStyle },
+  { from: 29, to: 32, label: 'I2C',               color: { color: '#26C6DA' }, width: 1, ...edgeStyle },
+  { from: 29, to: 33, label: 'SPI',               color: { color: '#26C6DA' }, width: 1, ...edgeStyle },
+  { from: 31, to: 40, label: 'GPA 입력',          color: { color: '#80DEEA' }, width: 1, ...edgeStyle },
+  { from: 31, to: 41, label: 'GPB 출력',          color: { color: '#80DEEA' }, width: 1, ...edgeStyle },
+
+  // ── 대시보드 / 기타 ──────────────────────────
+  { from: 42, to: 7,  label: 'FWD/REV',           color: { color: '#78909C' }, width: 1, ...edgeStyle },
+  { from: 42, to: 8,  label: 'FWD/REV',           color: { color: '#78909C' }, width: 1, ...edgeStyle },
+  { from: 7,  to: 43, label: '속도펄스\nCN2-16',  color: { color: '#78909C' }, width: 1, ...edgeStyle },
+  { from: 43, to: 44, label: '신호',              color: { color: '#78909C' }, width: 1, ...edgeStyle },
+
+  // ── 브레이크등 (독립 회로) ───────────────────
+  { from: 11, to: 37, label: '12V 직결\n(LV SW 이전)', color: { color: '#ef5350' }, width: 1, dashes: [4,4], ...edgeStyle },
+  { from: 37, to: 45, label: '브레이크등',        color: { color: '#ef5350' }, width: 1, ...edgeStyle },
+]);
+
+const container = document.getElementById('network');
+const data = { nodes, edges };
+const options = {
+  groups: GROUPS,
+  physics: {
+    enabled: true,
+    stabilization: { iterations: 200, fit: true },
+    barnesHut: {
+      gravitationalConstant: -8000,
+      centralGravity: 0.1,
+      springLength: 180,
+      springConstant: 0.04,
+      damping: 0.12,
+    },
+  },
+  interaction: {
+    hover: true,
+    tooltipDelay: 200,
+    navigationButtons: true,
+    keyboard: true,
+  },
+  layout: { improvedLayout: false },
+};
+
+const network = new vis.Network(container, data, options);
+
+// 안정화 후 physics 끄기 (노드 고정)
+network.once('stabilized', () => {
+  network.setOptions({ physics: { enabled: false } });
+});
+</script>
+</body>
+</html>
